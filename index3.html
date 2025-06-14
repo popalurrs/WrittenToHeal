@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Author Book Promo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-p6U9P4fZ7P+eS8ZOVb9a8OQ6cDYOe+K0/wZxjXxJdkkFqAOJkbnzld4wF7LGjMTvZB2q1HLnmWJUs9xJgtNfVg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      scroll-behavior: smooth;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f4f7f9;
+      color: #333;
+    }
+    header {
+      padding: 2rem;
+      text-align: center;
+      background: linear-gradient(120deg, #d1e7dd, #ffffff);
+    }
+    header h1 {
+      font-size: 2.5rem;
+      color: #2a4d3b;
+    }
+    header p {
+      font-size: 1.2rem;
+      margin-top: 0.5rem;
+      color: #456c5b;
+    }
+    .book-section {
+      padding: 3rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .book-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      transition: transform 0.3s ease;
+      max-width: 300px;
+      text-align: center;
+    }
+    .book-card:hover {
+      transform: scale(1.05);
+    }
+    .book-card img {
+      width: 100%;
+      border-radius: 8px;
+    }
+    .book-card h2 {
+      margin-top: 1rem;
+      font-size: 1.25rem;
+    }
+    .book-card p {
+      margin: 0.5rem 0 1rem;
+    }
+    .buy-button {
+      background-color: #2a4d3b;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    .buy-button:hover {
+      background-color: #4fa888;
+    }
+    .region-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: rgba(0,0,0,0.5);
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+    }
+    .region-box {
+      position: relative;
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    }
+    .close-btn {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      background: transparent;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #999;
+    }
+    .close-btn:hover {
+      color: #333;
+    }
+    .region-box button {
+      margin: 0.5rem;
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background-color: #2a4d3b;
+      color: white;
+      transition: background-color 0.3s ease;
+    }
+    .region-box button:hover {
+      background-color: #4fa888;
+    }
+    .socials-inline {
+      margin-top: 2rem;
+      text-align: center;
+      background-color: #1f3a2a;
+      padding: 2rem 0;
+      color: white;
+    }
+    .social-icons a {
+      margin: 0 1rem;
+      text-decoration: none;
+      font-size: 2.5rem;
+      color: #ffffff;
+      background-color: #2a4d3b;
+      padding: 0.5rem;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    .social-icons a:hover {
+      color: #4fa888;
+      background-color: #1f3a2a;
+    }
+    .social-label {
+      font-size: 1rem;
+      margin-left: 0.5rem;
+      color: white;
+      vertical-align: middle;
+    }
+    @media (min-width: 768px) {
+      .book-section {
+        flex-direction: row;
+        justify-content: center;
+        gap: 2rem;
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+  <script>
+    function scrollToSocials() {
+      document.getElementById('socials').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function showRegionModal() {
+      document.getElementById('regionModal').style.display = 'flex';
+    }
+
+    function redirectTo(region) {
+      const links = {
+        us: 'https://www.amazon.com/dp/B0FBWY1GPC',
+        ca: 'https://www.amazon.ca/dp/B0FBWY1GPC'
+      };
+      window.open(links[region], '_blank');
+      document.getElementById('regionModal').style.display = 'none';
+    }
+
+    function closeRegionModal() {
+      document.getElementById('regionModal').style.display = 'none';
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Written To Heal</h1>
+    <p>Discover my latest work and stay connected</p>
+  </header>
+
+  <section class="book-section">
+    <div class="book-card">
+      <img src="https://i.imgur.com/3dBIyIe.png" alt="Book Cover" />
+      <h2>Still Rising</h2>
+      <p>A 30-Day Journey to Renew Your Mind, Reclaim Your Strength & Rise Again</p>
+      <button class="buy-button" onclick="showRegionModal()">Buy on Amazon</button>
+    </div>
+  </section>
+
+  <div class="region-modal" id="regionModal">
+    <div class="region-box">
+      <button class="close-btn" onclick="closeRegionModal()">&times;</button>
+      <p>Choose your region:</p>
+      <button onclick="redirectTo('us')">Amazon US</button>
+      <button onclick="redirectTo('ca')">Amazon Canada</button>
+    </div>
+  </div>
+
+  <footer class="socials-inline" id="socials">
+    <div class="social-icons">
+      <a href="https://www.instagram.com/popalurrs/" target="_blank" aria-label="Instagram">
+        <i class="fab fa-instagram"></i><span class="social-label">Instagram</span>
+      </a>
+      <a href="https://www.tiktok.com/@popularoffcial" target="_blank" aria-label="TikTok">
+        <i class="fab fa-tiktok"></i><span class="social-label">TikTok</span>
+      </a>
+      <a href="https://www.amazon.com/author/radwanalkrad" target="_blank" aria-label="Amazon Author Page">
+        <i class="fab fa-amazon"></i><span class="social-label">Amazon Author</span>
+      </a>
+    </div>
+  </footer>
+</body>
+</html>
