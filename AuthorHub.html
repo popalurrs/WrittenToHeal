@@ -104,6 +104,7 @@
             <div id="authStatus" class="mt-4 text-sm text-gray-500">
                 <p>Loading user session...</p>
             </div>
+            <button id="signInButton" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors mt-2">Sign In</button>
             <button id="logoutButton" class="hidden mt-2 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors">Logout</button>
         </header>
 
@@ -214,6 +215,20 @@
         </div>
     </div>
 
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-2xl font-bold text-gray-800 mb-6">Owner Login</h3>
+            <div class="mb-4 text-red-500" id="loginError" role="alert"></div>
+            <form id="loginForm" class="flex flex-col space-y-4">
+                <input type="text" id="usernameInput" placeholder="Username" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" required>
+                <input type="password" id="passwordInput" placeholder="Password" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" required>
+                <button type="submit" class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">Log In</button>
+                <button type="button" id="closeLoginModalBtn" class="px-6 py-3 bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition-colors">Cancel</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -229,8 +244,11 @@
         let db;
         let auth;
         let currentBookId = null; // Used for editing existing books
+        let unsubscribeBooks = null; // Variable to hold the unsubscribe function for books listener
+        let ownerUid = null; // Will store the owner's UID if authenticated via initialAuthToken
 
         const authStatus = document.getElementById('authStatus');
+        const signInButton = document.getElementById('signInButton'); // New sign-in button
         const logoutButton = document.getElementById('logoutButton');
         const adminSection = document.getElementById('adminSection');
         const showAddBookFormBtn = document.getElementById('showAddBookFormBtn');
@@ -253,11 +271,18 @@
         const priceEURInput = document.getElementById('priceEUR');
         const priceGBPInput = document.getElementById('priceGBP');
 
-
         const amazonModal = document.getElementById('amazonModal');
         const amazonUSBtn = document.getElementById('amazonUSBtn');
         const amazonCABtn = document.getElementById('amazonCABtn');
         const closeModalBtn = document.getElementById('closeModalBtn');
+
+        // Login Modal elements
+        const loginModal = document.getElementById('loginModal');
+        const loginForm = document.getElementById('loginForm');
+        const usernameInput = document.getElementById('usernameInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginError = document.getElementById('loginError');
+        const closeLoginModalBtn = document.getElementById('closeLoginModalBtn');
 
         let currentAmazonUSLink = '';
         let currentAmazonCALink = '';
@@ -274,57 +299,196 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
 
+                // --- Initial Authentication Logic ---
+                // This block runs once on page load to establish an initial auth state.
+                if (initialAuthToken && !auth.currentUser) {
+                    // If owner token exists and no user is logged in, try to log in the owner
+                    try {
+                        const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                        ownerUid = userCredential.user.uid; // Store owner UID
+                        console.log("Owner signed in with custom token on init. UID:", ownerUid);
+                    } catch (error) {
+                        console.error("Owner custom token sign-in failed on init, attempting anonymous:", error);
+                        // If owner sign-in fails, fallback to anonymous
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously after owner token failure.");
+                    }
+                } else if (!auth.currentUser) {
+                    // If no owner token or no user logged in, sign in anonymously for public access
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously (no owner token or initial user).");
+                }
+
+
+                // --- onAuthStateChanged Listener ---
+                // This listener runs every time the authentication state changes.
                 onAuthStateChanged(auth, async (user) => {
+                    console.log("onAuthStateChanged fired. User:", user ? user.uid : "null", "isAnonymous:", user ? user.isAnonymous : "N/A");
                     if (user) {
                         authStatus.textContent = `Signed in as User ID: ${user.uid}`;
-                        logoutButton.classList.remove('hidden');
+                        
+                        // Determine if the current user is the owner based on initialAuthToken presence
+                        // and being a non-anonymous user.
+                        const isOwner = initialAuthToken && !user.isAnonymous;
+                        console.log("Is Owner calculated as:", isOwner, "(initialAuthToken present:", !!initialAuthToken, "user.isAnonymous:", user.isAnonymous + ")");
 
-                        // Show admin section and statistics only if authenticated via initialAuthToken
-                        if (initialAuthToken) {
-                            adminSection.classList.remove('hidden');
-                            visitCountDisplay.classList.remove('hidden'); // Show visit count to owner
-                            buyClicksDisplay.classList.remove('hidden'); // Show buy clicks to owner
-                            displayVisitCount(); // Display the latest visit count
-                            displayBuyButtonClicks(); // Display the latest buy button clicks
-                        } else {
-                            adminSection.classList.add('hidden'); // Hide if not authorized
-                            visitCountDisplay.classList.add('hidden'); // Hide visit count from non-owners
-                            buyClicksDisplay.classList.add('hidden'); // Hide buy clicks from non-owners
+                        // Unsubscribe from previous book listener if exists to prevent multiple listeners or permission errors
+                        if (unsubscribeBooks) {
+                            unsubscribeBooks();
+                            unsubscribeBooks = null;
+                            console.log("Unsubscribed from previous books listener.");
                         }
-                        fetchBooks(); // Fetch books now that user is authenticated
-                    } else {
-                        // If not logged in, attempt to log in with custom token if available
-                        authStatus.textContent = "Not signed in. Attempting authentication..."; // More general message
-                        logoutButton.classList.add('hidden');
-                        adminSection.classList.add('hidden'); // Ensure admin section is hidden
-                        visitCountDisplay.classList.add('hidden'); // Hide visit count from non-owners
-                        buyClicksDisplay.classList.add('hidden'); // Hide buy clicks from non-owners
-                        booksGrid.innerHTML = '';
-                        noBooksMessage.classList.remove('hidden'); // Show "No books" for unauthorized viewers
 
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                                // onAuthStateChanged will fire again with the user if successful
+                        if (isOwner) {
+                            signInButton.classList.add('hidden');
+                            logoutButton.classList.remove('hidden');
+                            adminSection.classList.remove('hidden'); // Show admin panel
+                            visitCountDisplay.classList.remove('hidden'); // Show stats
+                            buyClicksDisplay.classList.remove('hidden'); // Show stats
+                            displayVisitCount();
+                            displayBuyButtonClicks();
+                            
+                            // If owner, set ownerUid and then fetch books
+                            ownerUid = user.uid; // Confirm ownerUid
+                            console.log("Owner detected. Fetching owner's books. Owner UID:", ownerUid);
+                            fetchBooks(ownerUid); // Fetch books specific to this owner's UID
+
+                        } else {
+                            // User is signed in (anonymously or other non-owner type)
+                            signInButton.classList.remove('hidden'); // Show sign-in button for owner to log in
+                            logoutButton.classList.add('hidden'); // Hide logout button for anonymous users
+                            adminSection.classList.add('hidden'); // Hide admin panel
+                            visitCountDisplay.classList.add('hidden'); // Hide stats
+                            buyClicksDisplay.classList.add('hidden'); // Hide stats
+                            booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">Please sign in with authorized credentials to view content.</p>`;
+                            noBooksMessage.classList.add('hidden');
+                            console.log("Non-owner user detected. Displaying public content message.");
+                            
+                            // Fetch public books (i.e., books from the owner's UID if known for public display)
+                            // This relies on the security rules allowing read access for `request.auth != null`
+                            if (initialAuthToken) { // If there's an owner, try to display their books to public
+                                // We need to derive ownerUid from initialAuthToken without signing in
+                                // A simpler way is to just define ownerUid at the top level from the token if possible
+                                // For now, assume ownerUid is set on owner's first successful sign-in
+                                // Or, if the site is only ever serving ONE owner's content, we can use a hardcoded owner UID here.
+                                // For this scenario, let's derive ownerUid once upon page load if initialAuthToken exists.
+                                // Re-evaluate how ownerUid is set to ensure it's available for public display
+                                
+                                // Let's simplify: if initialAuthToken exists, assume its UID is the owner's for public display purposes.
+                                // For a true production app, you might store the owner's UID in a public document.
+                                try {
+                                    // This is a bit of a hack: sign in *temporarily* to get the UID from the token for public display
+                                    // Better: pre-configure ownerUid or make books truly public.
+                                    // For this exercise, we'll try to deduce it once if initialAuthToken is present.
+                                    // Or, simplest, make fetchBooks call with a "public" flag.
+
+                                    // The current fetchBooks is already set up for owner's path.
+                                    // If a user *is not* owner, they should not call fetchBooks(user.uid) if user.uid is anonymous.
+                                    // The rule change "allow read: if request.auth != null;" on the owner's path fixes this for all authenticated users.
+                                    
+                                    // Therefore, if ownerUid is available (meaning initialAuthToken exists and was processed)
+                                    // then non-owners can also fetch from that ownerUid's path.
+                                    if (ownerUid) { // If ownerUid was successfully derived at startup
+                                        fetchBooks(ownerUid); // Public users can read owner's books
+                                    } else {
+                                        // If no ownerUid is established (e.g., in a non-owner environment with no initialAuthToken set up)
+                                        booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">Welcome! Please sign in to manage books. Browse available books once the author has added them.</p>`;
+                                    }
+                                } catch (e) {
+                                    console.error("Error setting up public books display:", e);
+                                    booksGrid.innerHTML = `<p class="col-span-full text-center text-red-500">Error loading public content.</p>`;
+                                }
                             } else {
-                                // Fallback to anonymous sign-in for all visitors to increment public counters
-                                await signInAnonymously(auth);
-                                authStatus.textContent = "Signed in anonymously.";
+                                // This branch is for environments where no initialAuthToken is provided at all
+                                booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">Welcome! Browse available books once the author has added them.</p>`;
                             }
-                        } catch (error) {
-                            console.error("Error signing in:", error);
-                            authStatus.textContent = `Error signing in: ${error.message}.`;
+                        }
+                        // Increment visit count for any authenticated user session (owner or anonymous)
+                        incrementVisitCount(); 
+                    } else {
+                        // No user signed in at all (e.g., after explicit logout by owner and no auto-login attempt)
+                        console.log("No user authenticated. Displaying default message and ensuring anonymous sign-in for public metrics.");
+                        authStatus.textContent = "Not signed in. Please sign in to manage books.";
+                        signInButton.classList.remove('hidden');
+                        logoutButton.classList.add('hidden');
+                        adminSection.classList.add('hidden');
+                        visitCountDisplay.classList.add('hidden');
+                        buyClicksDisplay.classList.add('hidden');
+                        booksGrid.innerHTML = ''; // Clear books if no user at all
+                        noBooksMessage.classList.remove('hidden');
+                        
+                        // Unsubscribe if user logs out
+                        if (unsubscribeBooks) {
+                            unsubscribeBooks();
+                            unsubscribeBooks = null;
+                            console.log("Unsubscribed from books listener on logout.");
+                        }
+
+                        // Ensure an anonymous user is signed in for public counters to work.
+                        // This handles cases where owner logs out, or initial anonymous failed, ensuring `request.auth != null` is true.
+                        if (!auth.currentUser) { 
+                            await signInAnonymously(auth);
+                            console.log("Re-signed in anonymously for public metrics after logout/no user.");
+                        }
+                        
+                        // After ensuring anonymous login, attempt to display books if owner UID is known
+                        if (ownerUid) { // ownerUid would be set if initialAuthToken was processed on load
+                            fetchBooks(ownerUid); // Public users (now anonymously logged in) can read owner's books
+                        } else {
+                            booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">Welcome! Browse available books once the author has added them.</p>`;
                         }
                     }
-                    // Increment visit count AFTER authentication state is known,
-                    // ensuring 'user' is available for the 'request.auth != null' rule.
-                    incrementVisitCount();
                 });
             } catch (error) {
                 console.error("Error initializing Firebase:", error);
-                authStatus.textContent = `Error initializing Firebase: ${error.message}`;
+                authStatus.textContent = `Error initializing Firebase: ${error.message}. Please refresh.`;
             }
         }
+
+        // --- Owner Login Logic ---
+        signInButton.addEventListener('click', () => {
+            loginModal.classList.add('open');
+            loginError.textContent = ''; // Clear previous errors
+            usernameInput.value = '';
+            passwordInput.value = '';
+        });
+
+        closeLoginModalBtn.addEventListener('click', () => {
+            loginModal.classList.remove('open');
+        });
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = usernameInput.value;
+            const password = passwordInput.value;
+
+            loginError.textContent = ''; // Clear previous errors
+
+            // Hardcoded credentials check for the owner
+            if (username === "popalurrs" && password === "popalurrs1278!") {
+                if (initialAuthToken) {
+                    try {
+                        // Sign out any existing user (anonymous or otherwise) before signing in with custom token
+                        if (auth.currentUser) {
+                            await signOut(auth);
+                        }
+                        const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                        ownerUid = userCredential.user.uid; // Update ownerUid
+                        loginModal.classList.remove('open'); // Close on successful login
+                        console.log("Manual owner login successful. UID:", ownerUid);
+                    } catch (error) {
+                        console.error("Firebase custom token sign-in failed during manual login:", error);
+                        loginError.textContent = "Login failed: Invalid token or Firebase error. Check console for details.";
+                    }
+                } else {
+                    loginError.textContent = "Authorization token missing from environment. Cannot log in as owner.";
+                    console.error("initialAuthToken is missing. Cannot perform owner login.");
+                }
+            } else {
+                loginError.textContent = "Invalid username or password.";
+            }
+        });
+
 
         // --- Visit Counter Functions ---
         async function incrementVisitCount() {
@@ -344,8 +508,8 @@
         }
 
         async function displayVisitCount() {
-            // Only display for owner
-            if (!db || !initialAuthToken || !auth.currentUser) {
+            // Only display for owner (non-anonymous and initialAuthToken present)
+            if (!db || !initialAuthToken || !auth.currentUser || auth.currentUser.isAnonymous) {
                 console.warn("Cannot display visit count: Not authorized or Firebase not ready.");
                 return;
             }
@@ -382,8 +546,8 @@
         }
 
         async function displayBuyButtonClicks() {
-            // Only display for owner
-            if (!db || !initialAuthToken || !auth.currentUser) {
+            // Only display for owner (non-anonymous and initialAuthToken present)
+            if (!db || !initialAuthToken || !auth.currentUser || auth.currentUser.isAnonymous) {
                 console.warn("Cannot display buy button clicks: Not authorized or Firebase not ready.");
                 return;
             }
@@ -406,26 +570,27 @@
         // --- Book Management Functions (CRUD) ---
 
         // Fetches and displays books from Firestore
-        function fetchBooks() {
-            const currentUserId = auth.currentUser?.uid; // Directly get from auth.currentUser
+        // This function is now ONLY called when the user is determined to be the owner OR
+        // when a public user needs to read from the owner's known UID (if ownerUid is set).
+        function fetchBooks(userIdToFetch) { 
+            const targetUserId = userIdToFetch; 
 
-            if (!currentUserId || !db) {
-                console.warn("User ID not available or Firestore not initialized. Cannot fetch books.");
-                // Display a message indicating no books or access restricted if not authenticated
-                booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">No books available or access restricted.</p>`;
+            if (!targetUserId || !db) {
+                console.warn("Cannot fetch books: Target User ID not available or Firestore not initialized.");
+                booksGrid.innerHTML = `<p class="col-span-full text-center text-gray-500">Error: Unable to fetch books. Please try again.</p>`;
                 noBooksMessage.classList.remove('hidden');
                 return;
             }
-            console.log(`Fetching books for user: ${currentUserId}`); // Debug log
+            console.log(`Attempting to set up book listener for user ID: ${targetUserId}`);
 
             booksGrid.innerHTML = ''; // Clear existing books
             noBooksMessage.classList.add('hidden'); // Hide "No books" message initially
 
-            const booksCollectionRef = collection(db, `artifacts/${appId}/users/${currentUserId}/books`);
-            // Note: orderBy is commented out as per instructions due to potential index issues.
+            const booksCollectionRef = collection(db, `artifacts/${appId}/users/${targetUserId}/books`);
             const q = query(booksCollectionRef);
 
-            onSnapshot(q, (snapshot) => {
+            // The onSnapshot listener now only runs if fetchBooks is called by the owner or for public display
+            unsubscribeBooks = onSnapshot(q, (snapshot) => {
                 booksGrid.innerHTML = ''; // Clear before re-rendering
                 if (snapshot.empty) {
                     noBooksMessage.classList.remove('hidden');
@@ -440,8 +605,8 @@
                     books.forEach(book => displayBook(book));
                 }
             }, (error) => {
-                console.error("Error fetching books:", error);
-                booksGrid.innerHTML = `<p class="col-span-full text-center text-red-500">Error loading books: ${error.message}</p>`;
+                console.error("Error fetching books (from onSnapshot):", error);
+                booksGrid.innerHTML = `<p class="col-span-full text-center text-red-500">Error loading books: ${error.message}. Please check console for details.</p>`;
             });
         }
 
@@ -453,16 +618,16 @@
             let priceHtml = '';
             if (book.prices) {
                 priceHtml += '<div class="text-gray-800 text-sm font-semibold mb-2">';
-                if (book.prices.usd) {
+                if (book.prices.usd !== null) { // Check for null explicitly
                     priceHtml += `<span class="mr-2">USD: ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(book.prices.usd)}</span>`;
                 }
-                if (book.prices.cad) {
+                if (book.prices.cad !== null) {
                     priceHtml += `<span class="mr-2">CAD: ${new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(book.prices.cad)}</span>`;
                 }
-                if (book.prices.eur) {
+                if (book.prices.eur !== null) {
                     priceHtml += `<span class="mr-2">EUR: ${new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(book.prices.eur)}</span>`;
                 }
-                if (book.prices.gbp) {
+                if (book.prices.gbp !== null) {
                     priceHtml += `<span>GBP: ${new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(book.prices.gbp)}</span>`;
                 }
                 priceHtml += '</div>';
@@ -484,7 +649,7 @@
                             data-ca-link="${book.amazonCALink || ''}">
                         Buy on Amazon
                     </button>
-                    ${initialAuthToken && auth.currentUser ? `
+                    ${initialAuthToken && auth.currentUser && !auth.currentUser.isAnonymous ? `
                     <div class="flex space-x-2 w-full justify-center">
                         <button class="edit-button flex-1 px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition-colors text-sm" data-id="${book.id}">Edit</button>
                         <button class="delete-button flex-1 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600 transition-colors text-sm" data-id="${book.id}">Delete</button>
@@ -504,7 +669,7 @@
             }
 
             // Only add edit/delete listeners if the buttons are present (i.e., user is authorized owner)
-            if (initialAuthToken && auth.currentUser) {
+            if (initialAuthToken && auth.currentUser && !auth.currentUser.isAnonymous) {
                 const editButton = bookCard.querySelector('.edit-button');
                 if (editButton) {
                     editButton.addEventListener('click', () => editBook(book.id, book));
@@ -522,7 +687,7 @@
             e.preventDefault();
             // Ensure auth.currentUser.uid is present AND initialAuthToken confirms this is the authorized user
             const currentUserId = auth.currentUser?.uid;
-            if (!currentUserId || !initialAuthToken) {
+            if (!currentUserId || !initialAuthToken || auth.currentUser.isAnonymous) {
                 console.error("User not authenticated or not authorized to save books.");
                 alert("You are not authorized to save books. Access is restricted.");
                 return;
@@ -567,7 +732,7 @@
         // Populates the form for editing a book
         function editBook(id, book) {
             // Only allow edit if authorized owner
-            if (!initialAuthToken || !auth.currentUser) return;
+            if (!initialAuthToken || !auth.currentUser || auth.currentUser.isAnonymous) return;
 
             currentBookId = id;
             document.getElementById('bookTitle').value = book.title;
@@ -592,7 +757,7 @@
         // Confirms and deletes a book
         function confirmDeleteBook(id, title) {
             // Only allow delete if authorized owner
-            if (!initialAuthToken || !auth.currentUser) return;
+            if (!initialAuthToken || !auth.currentUser || auth.currentUser.isAnonymous) return;
 
             if (window.confirm(`Are you sure you want to delete "${title}"?`)) {
                 deleteBook(id);
@@ -602,7 +767,7 @@
         async function deleteBook(id) {
             // Ensure auth.currentUser.uid is present AND initialAuthToken confirms this is the authorized user
             const currentUserId = auth.currentUser?.uid;
-            if (!currentUserId || !initialAuthToken) {
+            if (!currentUserId || !initialAuthToken || auth.currentUser.isAnonymous) {
                 console.error("User not authenticated or not authorized to delete books.");
                 alert("You are not authorized to delete books. Access is restricted.");
                 return;
