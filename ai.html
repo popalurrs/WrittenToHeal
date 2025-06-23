@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallpaper Generator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for loading spinner */
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-purple-800 to-indigo-900 min-h-screen flex items-center justify-center font-sans text-gray-100 p-4">
+    <div class="bg-gray-800 bg-opacity-90 p-8 rounded-2xl shadow-xl w-full max-w-4xl space-y-8 backdrop-blur-sm">
+        <h1 class="text-4xl font-extrabold text-center text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 pb-4 border-b border-gray-700">
+            AI Wallpaper Generator
+        </h1>
+
+        <div class="space-y-6">
+            <!-- Resolution Selection -->
+            <div>
+                <label for="resolution" class="block text-lg font-medium mb-2 text-gray-200">Select Resolution:</label>
+                <select id="resolution" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 text-gray-100 shadow-sm transition duration-300">
+                    <option value="1920x1080">1920x1080 (Full HD)</option>
+                    <option value="2560x1440">2560x1440 (QHD)</option>
+                    <option value="3840x2160">3840x2160 (4K UHD)</option>
+                    <option value="1366x768">1366x768 (Laptop)</option>
+                    <option value="1440x900">1440x900 (Laptop)</option>
+                </select>
+            </div>
+
+            <!-- Description Input -->
+            <div>
+                <label for="description" class="block text-lg font-medium mb-2 text-gray-200">Describe Your Wallpaper:</label>
+                <textarea id="description" rows="5" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 text-gray-100 placeholder-gray-400 shadow-sm transition duration-300"
+                    placeholder="e.g., A serene forest at sunset with a magical glow, cyberpunk city with neon lights and flying cars, abstract geometric patterns in vibrant colors."></textarea>
+            </div>
+
+            <!-- Generate Button -->
+            <button id="generateBtn" class="w-full py-3 px-6 rounded-lg text-lg font-semibold bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 transform hover:scale-105 shadow-lg">
+                Generate Wallpapers
+            </button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden flex justify-center items-center py-8">
+            <div class="loader"></div>
+            <p class="ml-4 text-xl text-gray-300">Generating stunning wallpapers...</p>
+        </div>
+
+        <!-- Image Gallery -->
+        <div id="imageGallery" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-8">
+            <!-- Images will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <script>
+        // Get references to HTML elements
+        const generateBtn = document.getElementById('generateBtn');
+        const resolutionSelect = document.getElementById('resolution');
+        const descriptionInput = document.getElementById('description');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const imageGallery = document.getElementById('imageGallery');
+
+        /**
+         * Generates wallpapers based on user input.
+         */
+        async function generateWallpapers() {
+            const resolution = resolutionSelect.value;
+            const description = descriptionInput.value.trim();
+
+            if (!description) {
+                alert('Please enter a description for your wallpaper!');
+                return;
+            }
+
+            // Show loading indicator and clear previous images
+            loadingIndicator.classList.remove('hidden');
+            imageGallery.innerHTML = ''; // Clear previous images
+
+            const prompt = `${description}, ${resolution} wallpaper`;
+
+            try {
+                // Construct the payload for the image generation API
+                const payload = {
+                    instances: { prompt: prompt },
+                    parameters: { "sampleCount": 5 } // Request 5 images
+                };
+                const apiKey = ""; // API key will be provided by the Canvas runtime
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+                // Make the API call to generate images
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                // Check if images were generated successfully
+                if (result.predictions && result.predictions.length > 0) {
+                    result.predictions.forEach((prediction, index) => {
+                        if (prediction.bytesBase64Encoded) {
+                            const imageUrl = `data:image/png;base64,${prediction.bytesBase64Encoded}`;
+                            createImageCard(imageUrl, description, index);
+                        } else {
+                            console.error(`Image ${index} data missing.`);
+                        }
+                    });
+                } else {
+                    imageGallery.innerHTML = '<p class="text-center text-red-400 col-span-full">No wallpapers generated. Please try a different description.</p>';
+                    console.error("No predictions found in the response:", result);
+                }
+            } catch (error) {
+                console.error('Error generating wallpapers:', error);
+                imageGallery.innerHTML = '<p class="text-center text-red-400 col-span-full">An error occurred while generating wallpapers. Please try again.</p>';
+            } finally {
+                loadingIndicator.classList.add('hidden'); // Hide loading indicator
+            }
+        }
+
+        /**
+         * Creates an image card with an image and a download button.
+         * @param {string} imageUrl - The URL of the image.
+         * @param {string} description - The description used for the wallpaper.
+         * @param {number} index - The index of the image (for naming).
+         */
+        function createImageCard(imageUrl, description, index) {
+            const card = document.createElement('div');
+            card.className = 'bg-gray-700 rounded-xl overflow-hidden shadow-lg transform transition duration-300 hover:scale-105 hover:shadow-2xl';
+
+            const img = document.createElement('img');
+            img.src = imageUrl;
+            img.alt = `Generated Wallpaper ${index + 1}: ${description}`;
+            img.className = 'w-full h-48 object-cover rounded-t-xl';
+
+            const downloadBtnContainer = document.createElement('div');
+            downloadBtnContainer.className = 'p-4';
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = imageUrl;
+            downloadLink.download = `wallpaper_${description.replace(/\s/g, '_')}_${index + 1}.png`; // Suggest a filename
+            downloadLink.className = 'w-full block py-2 px-4 bg-gradient-to-r from-green-500 to-teal-500 text-white font-semibold rounded-lg text-center hover:from-green-600 hover:to-teal-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75';
+            downloadLink.textContent = 'Download Wallpaper';
+
+            downloadBtnContainer.appendChild(downloadLink);
+            card.appendChild(img);
+            card.appendChild(downloadBtnContainer);
+            imageGallery.appendChild(card);
+        }
+
+        // Add event listener to the generate button
+        generateBtn.addEventListener('click', generateWallpapers);
+    </script>
+</body>
+</html>
